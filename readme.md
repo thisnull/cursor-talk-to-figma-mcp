@@ -191,6 +191,12 @@ The MCP server provides the following tools for interacting with Figma:
 - `get_instance_overrides` - Extract override properties from a selected component instance
 - `set_instance_overrides` - Apply extracted overrides to target instances
 
+### Variables
+
+- `create_variable_collection` - Create a variable collection (optionally with modes)
+- `create_variable` - Create a variable in a collection
+- `set_variable_value` - Set a variable value for a specific mode
+
 ### Export & Advanced
 
 - `export_node_as_image` - Export a node as an image (PNG, JPG, SVG, or PDF) - limited support on image currently returning base64 as text

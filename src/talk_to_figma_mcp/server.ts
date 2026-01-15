@@ -85,6 +85,22 @@ const serverArg = args.find(arg => arg.startsWith('--server='));
 const serverUrl = serverArg ? serverArg.split('=')[1] : 'localhost';
 const WS_URL = serverUrl === 'localhost' ? `ws://${serverUrl}` : `wss://${serverUrl}`;
 
+const variableValueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.object({
+    r: z.number().describe("Red component (0-1)"),
+    g: z.number().describe("Green component (0-1)"),
+    b: z.number().describe("Blue component (0-1)"),
+    a: z.number().min(0).max(1).optional().describe("Alpha component (0-1)"),
+  }),
+  z.object({
+    type: z.literal("VARIABLE_ALIAS"),
+    variableId: z.string(),
+  }),
+]);
+
 // Document Info Tool
 server.tool(
   "get_document_info",
@@ -955,6 +971,125 @@ server.tool(
             type: "text",
             text: `Error getting styles: ${error instanceof Error ? error.message : String(error)
               }`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Create Variable Collection Tool
+server.tool(
+  "create_variable_collection",
+  "Create a variable collection in the current Figma document",
+  {
+    name: z.string().describe("Name for the variable collection"),
+    modes: z
+      .array(z.string())
+      .optional()
+      .describe("Optional mode names; the first entry renames the default mode"),
+  },
+  async ({ name, modes }: any) => {
+    try {
+      const result = await sendCommandToFigma("create_variable_collection", {
+        name,
+        modes,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error creating variable collection: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Create Variable Tool
+server.tool(
+  "create_variable",
+  "Create a variable in a collection",
+  {
+    name: z.string().describe("Name of the variable"),
+    collectionId: z.string().describe("Target variable collection ID"),
+    resolvedType: z.enum(["COLOR", "FLOAT", "STRING", "BOOLEAN"]),
+    valuesByMode: z
+      .record(variableValueSchema)
+      .optional()
+      .describe("Map of modeId or mode name to value"),
+  },
+  async ({ name, collectionId, resolvedType, valuesByMode }: any) => {
+    try {
+      const result = await sendCommandToFigma("create_variable", {
+        name,
+        collectionId,
+        resolvedType,
+        valuesByMode,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error creating variable: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Set Variable Value Tool
+server.tool(
+  "set_variable_value",
+  "Set a variable value for a given mode",
+  {
+    variableId: z.string().describe("Target variable ID"),
+    value: variableValueSchema.describe("Value to assign (or alias)"),
+    modeId: z.string().optional().describe("Mode ID to set"),
+    modeName: z.string().optional().describe("Mode name to set"),
+  },
+  async ({ variableId, value, modeId, modeName }: any) => {
+    try {
+      const result = await sendCommandToFigma("set_variable_value", {
+        variableId,
+        value,
+        modeId,
+        modeName,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error setting variable value: ${error instanceof Error ? error.message : String(error)}`,
           },
         ],
       };
@@ -2608,6 +2743,13 @@ This detailed process ensures you correctly interpret the reaction data, prepare
 
 
 // Define command types and parameters
+type VariableValueInput =
+  | string
+  | number
+  | boolean
+  | { r: number; g: number; b: number; a?: number }
+  | { type: "VARIABLE_ALIAS"; variableId: string };
+
 type FigmaCommand =
   | "get_document_info"
   | "get_selection"
@@ -2624,6 +2766,9 @@ type FigmaCommand =
   | "delete_node"
   | "delete_multiple_nodes"
   | "get_styles"
+  | "create_variable_collection"
+  | "create_variable"
+  | "set_variable_value"
   | "get_local_components"
   | "create_component_instance"
   | "get_instance_overrides"
@@ -2716,6 +2861,22 @@ type CommandParams = {
     nodeIds: string[];
   };
   get_styles: Record<string, never>;
+  create_variable_collection: {
+    name: string;
+    modes?: string[];
+  };
+  create_variable: {
+    name: string;
+    collectionId: string;
+    resolvedType: "COLOR" | "FLOAT" | "STRING" | "BOOLEAN";
+    valuesByMode?: Record<string, VariableValueInput>;
+  };
+  set_variable_value: {
+    variableId: string;
+    value: VariableValueInput;
+    modeId?: string;
+    modeName?: string;
+  };
   get_local_components: Record<string, never>;
   get_team_components: Record<string, never>;
   create_component_instance: {
@@ -3098,6 +3259,3 @@ main().catch(error => {
   logger.error(`Error starting FigmaMCP server: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 });
-
-
-

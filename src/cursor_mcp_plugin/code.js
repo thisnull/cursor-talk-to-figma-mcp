@@ -141,6 +141,12 @@ async function handleCommand(command, params) {
       return await deleteMultipleNodes(params);
     case "get_styles":
       return await getStyles();
+    case "create_variable_collection":
+      return await createVariableCollection(params);
+    case "create_variable":
+      return await createVariable(params);
+    case "set_variable_value":
+      return await setVariableValue(params);
     case "get_local_components":
       return await getLocalComponents();
     // case "get_team_components":
@@ -1124,6 +1130,235 @@ async function getStyles() {
       name: style.name,
       key: style.key,
     })),
+  };
+}
+
+function ensureVariablesApi() {
+  if (!figma.variables) {
+    throw new Error("Figma variables API is not available in this editor.");
+  }
+}
+
+function serializeVariableCollection(collection) {
+  return {
+    id: collection.id,
+    name: collection.name,
+    defaultModeId: collection.defaultModeId,
+    modes: collection.modes.map((mode) => ({
+      modeId: mode.modeId,
+      name: mode.name,
+    })),
+  };
+}
+
+function resolveModeId(collection, modeKey) {
+  if (!modeKey) {
+    return collection.defaultModeId;
+  }
+
+  const directMatch = collection.modes.find((mode) => mode.modeId === modeKey);
+  if (directMatch) {
+    return directMatch.modeId;
+  }
+
+  const nameMatch = collection.modes.find((mode) => mode.name === modeKey);
+  if (nameMatch) {
+    return nameMatch.modeId;
+  }
+
+  throw new Error(`Mode not found in collection: ${modeKey}`);
+}
+
+async function resolveVariableValue(rawValue, resolvedType) {
+  if (rawValue && typeof rawValue === "object") {
+    if (rawValue.type === "VARIABLE_ALIAS") {
+      if (!rawValue.variableId) {
+        throw new Error("VARIABLE_ALIAS requires variableId");
+      }
+
+      const aliasVariable = await figma.variables.getVariableByIdAsync(
+        rawValue.variableId
+      );
+      if (!aliasVariable) {
+        throw new Error(
+          `Variable not found for alias: ${rawValue.variableId}`
+        );
+      }
+      return figma.variables.createVariableAlias(aliasVariable);
+    }
+
+    if (
+      typeof rawValue.r === "number" &&
+      typeof rawValue.g === "number" &&
+      typeof rawValue.b === "number"
+    ) {
+      if (resolvedType && resolvedType !== "COLOR") {
+        throw new Error(
+          `Expected ${resolvedType} value, received a color object`
+        );
+      }
+
+      const color = {
+        r: rawValue.r,
+        g: rawValue.g,
+        b: rawValue.b,
+      };
+      if (typeof rawValue.a === "number") {
+        color.a = rawValue.a;
+      }
+      return color;
+    }
+
+    throw new Error("Unsupported variable value object");
+  }
+
+  if (resolvedType === "COLOR") {
+    throw new Error("COLOR variables require an RGBA value or alias");
+  }
+
+  if (resolvedType === "FLOAT" && typeof rawValue !== "number") {
+    throw new Error("FLOAT variables require a numeric value");
+  }
+
+  if (resolvedType === "STRING" && typeof rawValue !== "string") {
+    throw new Error("STRING variables require a string value");
+  }
+
+  if (resolvedType === "BOOLEAN" && typeof rawValue !== "boolean") {
+    throw new Error("BOOLEAN variables require a boolean value");
+  }
+
+  return rawValue;
+}
+
+async function createVariableCollection(params) {
+  ensureVariablesApi();
+
+  const { name, modes = [] } = params || {};
+
+  if (!name) {
+    throw new Error("Missing name parameter");
+  }
+
+  const collection = figma.variables.createVariableCollection(name);
+  if (Array.isArray(modes) && modes.length > 0) {
+    const [firstMode, ...restModes] = modes;
+    if (firstMode) {
+      collection.renameMode(collection.modes[0].modeId, firstMode);
+    }
+    for (const modeName of restModes) {
+      collection.addMode(modeName);
+    }
+  }
+
+  return serializeVariableCollection(collection);
+}
+
+function serializeVariable(variable) {
+  return {
+    id: variable.id,
+    name: variable.name,
+    key: variable.key,
+    resolvedType: variable.resolvedType,
+    variableCollectionId: variable.variableCollectionId,
+    valuesByMode: variable.valuesByMode,
+  };
+}
+
+async function createVariable(params) {
+  ensureVariablesApi();
+
+  const {
+    name,
+    collectionId,
+    resolvedType,
+    valuesByMode = {},
+    description,
+    scopes,
+    hiddenFromPublishing,
+  } = params || {};
+
+  if (!name) {
+    throw new Error("Missing name parameter");
+  }
+  if (!collectionId) {
+    throw new Error("Missing collectionId parameter");
+  }
+  if (!resolvedType) {
+    throw new Error("Missing resolvedType parameter");
+  }
+
+  const collection = await figma.variables.getVariableCollectionByIdAsync(
+    collectionId
+  );
+  if (!collection) {
+    throw new Error(`Variable collection not found: ${collectionId}`);
+  }
+
+  const variable = figma.variables.createVariable(
+    name,
+    collection,
+    resolvedType
+  );
+
+  if (typeof description === "string") {
+    variable.description = description;
+  }
+  if (Array.isArray(scopes)) {
+    variable.scopes = scopes;
+  }
+  if (typeof hiddenFromPublishing === "boolean") {
+    variable.hiddenFromPublishing = hiddenFromPublishing;
+  }
+
+  const modeValues =
+    valuesByMode && typeof valuesByMode === "object" ? valuesByMode : {};
+
+  for (const [modeKey, rawValue] of Object.entries(modeValues)) {
+    const modeId = resolveModeId(collection, modeKey);
+    const value = await resolveVariableValue(rawValue, resolvedType);
+    variable.setValueForMode(modeId, value);
+  }
+
+  return serializeVariable(variable);
+}
+
+async function setVariableValue(params) {
+  ensureVariablesApi();
+
+  const { variableId, modeId, modeName, value } = params || {};
+
+  if (!variableId) {
+    throw new Error("Missing variableId parameter");
+  }
+
+  const variable = await figma.variables.getVariableByIdAsync(variableId);
+  if (!variable) {
+    throw new Error(`Variable not found: ${variableId}`);
+  }
+
+  const collection = await figma.variables.getVariableCollectionByIdAsync(
+    variable.variableCollectionId
+  );
+  if (!collection) {
+    throw new Error(
+      `Variable collection not found: ${variable.variableCollectionId}`
+    );
+  }
+
+  const targetModeId = resolveModeId(collection, modeId || modeName);
+  const resolvedValue = await resolveVariableValue(
+    value,
+    variable.resolvedType
+  );
+  variable.setValueForMode(targetModeId, resolvedValue);
+
+  return {
+    id: variable.id,
+    name: variable.name,
+    resolvedType: variable.resolvedType,
+    modeId: targetModeId,
+    value: variable.valuesByMode[targetModeId],
   };
 }
 
