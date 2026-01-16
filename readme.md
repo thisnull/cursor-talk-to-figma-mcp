@@ -190,6 +190,8 @@ Example: add interaction with simplified inputs:
 }
 ```
 
+Tip: set `"skipCompatibilityChecks": true` in `options` to bypass trigger/action guardrails.
+
 ### Creating Elements
 
 - `create_rectangle` - Create a new rectangle with position, size, and optional name

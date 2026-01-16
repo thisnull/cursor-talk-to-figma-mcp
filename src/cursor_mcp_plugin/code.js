@@ -1141,6 +1141,8 @@ async function addInteraction(params) {
   const normalizedNavigation = mappedAction
     ? mappedAction.navigation
     : action.navigation;
+  const skipCompatibilityChecks =
+    options && options.skipCompatibilityChecks === true;
 
   const triggerRules = {
     ON_HOVER: {
@@ -1166,6 +1168,7 @@ async function addInteraction(params) {
 
   const triggerRule = triggerRules[normalizedTrigger.type];
   if (
+    !skipCompatibilityChecks &&
     triggerRule &&
     triggerRule.allowed.indexOf(normalizedActionType) === -1
   ) {

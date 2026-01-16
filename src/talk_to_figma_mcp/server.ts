@@ -216,6 +216,7 @@ const interactionOptionsSchema = z
     preserveScrollPosition: z.boolean().optional(),
     matchLayers: z.boolean().optional(),
     replaceExisting: z.boolean().optional(),
+    skipCompatibilityChecks: z.boolean().optional(),
   })
   .optional();
 
