@@ -1040,12 +1040,17 @@ function normalizeReactionInput(reaction, index, options) {
 }
 
 async function applyNodeReactions(node, reactions) {
-  if (typeof node.setReactionsAsync === "function") {
-    await node.setReactionsAsync(reactions);
-    return;
-  }
+  try {
+    if (typeof node.setReactionsAsync === "function") {
+      await node.setReactionsAsync(reactions);
+      return;
+    }
 
-  node.reactions = reactions;
+    node.reactions = reactions;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Figma setReactionsAsync failed: ${message}`);
+  }
 }
 
 async function getNodeReactions(params) {
@@ -1130,11 +1135,42 @@ async function addInteraction(params) {
 
   ensureReactionsSupported(node);
 
+  const normalizedTrigger = normalizeTrigger(trigger, 0);
   const mappedAction = actionTypeMap[action.type];
   const normalizedActionType = mappedAction ? mappedAction.type : action.type;
   const normalizedNavigation = mappedAction
     ? mappedAction.navigation
     : action.navigation;
+
+  const triggerRules = {
+    ON_HOVER: {
+      allowed: ["NODE"],
+      message:
+        "ON_HOVER only supports navigation actions (use navigate/change_to/overlay/swap/scroll_to).",
+    },
+    MOUSE_ENTER: {
+      allowed: ["NODE"],
+      message:
+        "MOUSE_ENTER only supports navigation actions (use navigate/change_to/overlay/swap/scroll_to).",
+    },
+    MOUSE_LEAVE: {
+      allowed: ["BACK", "CLOSE"],
+      message: "MOUSE_LEAVE only supports BACK or CLOSE actions.",
+    },
+    ON_DRAG: {
+      allowed: [],
+      message:
+        "ON_DRAG is not supported via the plugin API for this node. Use interactive components in Figma.",
+    },
+  };
+
+  const triggerRule = triggerRules[normalizedTrigger.type];
+  if (
+    triggerRule &&
+    triggerRule.allowed.indexOf(normalizedActionType) === -1
+  ) {
+    throw new Error(triggerRule.message);
+  }
 
   if (normalizedActionType === "NODE" && normalizedNavigation === "CHANGE_TO") {
     const destinationId = action.destinationId;
