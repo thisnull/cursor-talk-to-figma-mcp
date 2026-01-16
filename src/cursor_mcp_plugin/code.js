@@ -161,6 +161,12 @@ async function handleCommand(command, params) {
       return await deleteVariable(params);
     case "set_variable_value":
       return await setVariableValue(params);
+    case "bind_variable_to_node_field":
+      return await bindVariableToNodeField(params);
+    case "bind_variable_to_paint":
+      return await bindVariableToPaint(params);
+    case "bind_variable_to_text_range":
+      return await bindVariableToTextRange(params);
     case "get_local_components":
       return await getLocalComponents();
     // case "get_team_components":
@@ -1153,6 +1159,19 @@ function ensureVariablesApi() {
   }
 }
 
+async function getVariableByIdOrThrow(variableId) {
+  if (!variableId) {
+    throw new Error("Missing variableId parameter");
+  }
+
+  const variable = await figma.variables.getVariableByIdAsync(variableId);
+  if (!variable) {
+    throw new Error(`Variable not found: ${variableId}`);
+  }
+
+  return variable;
+}
+
 function serializeVariableCollection(collection) {
   return {
     id: collection.id,
@@ -1538,14 +1557,7 @@ async function deleteVariable(params) {
   ensureVariablesApi();
 
   const { variableId } = params || {};
-  if (!variableId) {
-    throw new Error("Missing variableId parameter");
-  }
-
-  const variable = await figma.variables.getVariableByIdAsync(variableId);
-  if (!variable) {
-    throw new Error(`Variable not found: ${variableId}`);
-  }
+  const variable = await getVariableByIdOrThrow(variableId);
 
   const response = {
     id: variable.id,
@@ -1554,6 +1566,136 @@ async function deleteVariable(params) {
 
   variable.remove();
   return response;
+}
+
+async function bindVariableToNodeField(params) {
+  ensureVariablesApi();
+
+  const { nodeId, variableId, field } = params || {};
+  if (!nodeId) {
+    throw new Error("Missing nodeId parameter");
+  }
+  if (!field) {
+    throw new Error("Missing field parameter");
+  }
+
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (!node) {
+    throw new Error(`Node not found with ID: ${nodeId}`);
+  }
+  if (!("setBoundVariable" in node)) {
+    throw new Error(`Node does not support bound variables: ${nodeId}`);
+  }
+
+  const variable = await getVariableByIdOrThrow(variableId);
+  node.setBoundVariable(field, variable);
+
+  const result = {
+    nodeId: node.id,
+    field,
+    variableId: variable.id,
+  };
+
+  if ("boundVariables" in node) {
+    result.boundVariables = node.boundVariables;
+  }
+
+  return result;
+}
+
+async function bindVariableToPaint(params) {
+  ensureVariablesApi();
+
+  const {
+    nodeId,
+    variableId,
+    paintType = "fills",
+    paintIndex = 0,
+    field = "color",
+  } = params || {};
+
+  if (!nodeId) {
+    throw new Error("Missing nodeId parameter");
+  }
+
+  if (!figma.variables.setBoundVariableForPaint) {
+    throw new Error("setBoundVariableForPaint is not available in this editor.");
+  }
+
+  if (paintType !== "fills" && paintType !== "strokes") {
+    throw new Error("paintType must be 'fills' or 'strokes'");
+  }
+
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (!node) {
+    throw new Error(`Node not found with ID: ${nodeId}`);
+  }
+
+  const paints = node[paintType];
+  if (!Array.isArray(paints)) {
+    throw new Error(`Node ${nodeId} has no ${paintType} to bind`);
+  }
+
+  if (paintIndex < 0 || paintIndex >= paints.length) {
+    throw new Error(`paintIndex out of range for ${paintType}`);
+  }
+
+  const variable = await getVariableByIdOrThrow(variableId);
+  const updatedPaint = figma.variables.setBoundVariableForPaint(
+    paints[paintIndex],
+    field,
+    variable
+  );
+
+  const nextPaints = paints.slice();
+  nextPaints[paintIndex] = updatedPaint;
+  node[paintType] = nextPaints;
+
+  return {
+    nodeId: node.id,
+    paintType,
+    paintIndex,
+    field,
+    variableId: variable.id,
+  };
+}
+
+async function bindVariableToTextRange(params) {
+  ensureVariablesApi();
+
+  const { nodeId, variableId, field, start = 0, end } = params || {};
+  if (!nodeId) {
+    throw new Error("Missing nodeId parameter");
+  }
+  if (!field) {
+    throw new Error("Missing field parameter");
+  }
+
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (!node) {
+    throw new Error(`Node not found with ID: ${nodeId}`);
+  }
+  if (node.type !== "TEXT") {
+    throw new Error(`Node ${nodeId} is not a text node`);
+  }
+
+  const variable = await getVariableByIdOrThrow(variableId);
+  const textLength = node.characters.length;
+  const clampedEnd = end === undefined ? textLength : end;
+
+  if (start < 0 || clampedEnd < start || clampedEnd > textLength) {
+    throw new Error("Invalid text range for binding");
+  }
+
+  node.setRangeBoundVariable(start, clampedEnd, field, variable);
+
+  return {
+    nodeId: node.id,
+    field,
+    variableId: variable.id,
+    start,
+    end: clampedEnd,
+  };
 }
 
 async function setVariableValue(params) {

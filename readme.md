@@ -203,6 +203,9 @@ The MCP server provides the following tools for interacting with Figma:
 - `update_variable` - Update variable metadata or values
 - `delete_variable` - Delete a variable
 - `set_variable_value` - Set a variable value for a specific mode (alias supported)
+- `bind_variable_to_node_field` - Bind a variable to a node field (width, height, opacity, etc.)
+- `bind_variable_to_paint` - Bind a variable to a paint field (fills/strokes)
+- `bind_variable_to_text_range` - Bind a variable to a text range field
 
 ### Export & Advanced
 

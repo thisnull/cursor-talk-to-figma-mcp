@@ -104,6 +104,35 @@ const variableValueSchema = z.union([
   }),
 ]);
 
+const variableBindableNodeFieldSchema = z.enum([
+  "height",
+  "width",
+  "characters",
+  "itemSpacing",
+  "paddingLeft",
+  "paddingRight",
+  "paddingTop",
+  "paddingBottom",
+  "visible",
+  "topLeftRadius",
+  "topRightRadius",
+  "bottomLeftRadius",
+  "bottomRightRadius",
+  "minWidth",
+  "maxWidth",
+  "minHeight",
+  "maxHeight",
+  "counterAxisSpacing",
+  "strokeWeight",
+  "strokeTopWeight",
+  "strokeRightWeight",
+  "strokeBottomWeight",
+  "strokeLeftWeight",
+  "opacity",
+  "gridRowGap",
+  "gridColumnGap",
+]);
+
 // Document Info Tool
 server.tool(
   "get_document_info",
@@ -1371,6 +1400,125 @@ server.tool(
           {
             type: "text",
             text: `Error setting variable value: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Bind Variable to Node Field Tool
+server.tool(
+  "bind_variable_to_node_field",
+  "Bind a variable to a node field (width, height, opacity, padding, etc.)",
+  {
+    nodeId: z.string().describe("Target node ID"),
+    variableId: z.string().describe("Variable ID to bind"),
+    field: variableBindableNodeFieldSchema.describe("Bindable node field"),
+  },
+  async ({ nodeId, variableId, field }: any) => {
+    try {
+      const result = await sendCommandToFigma("bind_variable_to_node_field", {
+        nodeId,
+        variableId,
+        field,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error binding variable to node field: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Bind Variable to Paint Tool
+server.tool(
+  "bind_variable_to_paint",
+  "Bind a variable to a paint field (fills or strokes)",
+  {
+    nodeId: z.string().describe("Target node ID"),
+    variableId: z.string().describe("Variable ID to bind"),
+    paintType: z.enum(["fills", "strokes"]).optional().describe("Paint array to update"),
+    paintIndex: z.number().int().optional().describe("Paint index to update"),
+    field: z.string().optional().describe("Paint field (e.g. color, opacity)"),
+  },
+  async ({ nodeId, variableId, paintType, paintIndex, field }: any) => {
+    try {
+      const result = await sendCommandToFigma("bind_variable_to_paint", {
+        nodeId,
+        variableId,
+        paintType,
+        paintIndex,
+        field,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error binding variable to paint: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Bind Variable to Text Range Tool
+server.tool(
+  "bind_variable_to_text_range",
+  "Bind a variable to a text range field",
+  {
+    nodeId: z.string().describe("Target text node ID"),
+    variableId: z.string().describe("Variable ID to bind"),
+    field: z.string().describe("Text field to bind"),
+    start: z.number().int().optional().describe("Range start (inclusive)"),
+    end: z.number().int().optional().describe("Range end (exclusive)"),
+  },
+  async ({ nodeId, variableId, field, start, end }: any) => {
+    try {
+      const result = await sendCommandToFigma("bind_variable_to_text_range", {
+        nodeId,
+        variableId,
+        field,
+        start,
+        end,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error binding variable to text range: ${error instanceof Error ? error.message : String(error)}`,
           },
         ],
       };
@@ -3063,6 +3211,9 @@ type FigmaCommand =
   | "update_variable"
   | "delete_variable"
   | "set_variable_value"
+  | "bind_variable_to_node_field"
+  | "bind_variable_to_paint"
+  | "bind_variable_to_text_range"
   | "get_local_components"
   | "create_component_instance"
   | "get_instance_overrides"
@@ -3204,6 +3355,25 @@ type CommandParams = {
     value: VariableValueInput;
     modeId?: string;
     modeName?: string;
+  };
+  bind_variable_to_node_field: {
+    nodeId: string;
+    variableId: string;
+    field: string;
+  };
+  bind_variable_to_paint: {
+    nodeId: string;
+    variableId: string;
+    paintType?: "fills" | "strokes";
+    paintIndex?: number;
+    field?: string;
+  };
+  bind_variable_to_text_range: {
+    nodeId: string;
+    variableId: string;
+    field: string;
+    start?: number;
+    end?: number;
   };
   get_local_components: Record<string, never>;
   get_team_components: Record<string, never>;
