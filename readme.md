@@ -193,9 +193,16 @@ The MCP server provides the following tools for interacting with Figma:
 
 ### Variables
 
+- `get_variable_collections` - List variable collections and modes
+- `get_variables` - List variables (optionally filtered by collection or type)
 - `create_variable_collection` - Create a variable collection (optionally with modes)
+- `add_variable_mode` - Add a mode to a collection
+- `rename_variable_mode` - Rename a collection mode
+- `remove_variable_mode` - Remove a collection mode
 - `create_variable` - Create a variable in a collection
-- `set_variable_value` - Set a variable value for a specific mode
+- `update_variable` - Update variable metadata or values
+- `delete_variable` - Delete a variable
+- `set_variable_value` - Set a variable value for a specific mode (alias supported)
 
 ### Export & Advanced
 

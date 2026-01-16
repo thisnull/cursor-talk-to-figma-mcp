@@ -97,7 +97,10 @@ const variableValueSchema = z.union([
   }),
   z.object({
     type: z.literal("VARIABLE_ALIAS"),
-    variableId: z.string(),
+    variableId: z.string().optional(),
+    id: z.string().optional(),
+  }).refine((value) => Boolean(value.variableId || value.id), {
+    message: "VARIABLE_ALIAS requires variableId or id",
   }),
 ]);
 
@@ -978,6 +981,73 @@ server.tool(
   }
 );
 
+// Get Variable Collections Tool
+server.tool(
+  "get_variable_collections",
+  "Get all variable collections from the current Figma document",
+  {},
+  async () => {
+    try {
+      const result = await sendCommandToFigma("get_variable_collections");
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error getting variable collections: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Get Variables Tool
+server.tool(
+  "get_variables",
+  "Get variables from the current Figma document",
+  {
+    collectionId: z.string().optional().describe("Filter by collection ID"),
+    resolvedType: z
+      .enum(["COLOR", "FLOAT", "STRING", "BOOLEAN"])
+      .optional()
+      .describe("Filter by resolved type"),
+  },
+  async ({ collectionId, resolvedType }: any) => {
+    try {
+      const result = await sendCommandToFigma("get_variables", {
+        collectionId,
+        resolvedType,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error getting variables: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
 // Create Variable Collection Tool
 server.tool(
   "create_variable_collection",
@@ -1016,6 +1086,117 @@ server.tool(
   }
 );
 
+// Add Variable Mode Tool
+server.tool(
+  "add_variable_mode",
+  "Add a mode to a variable collection",
+  {
+    collectionId: z.string().describe("Variable collection ID"),
+    name: z.string().describe("Mode name"),
+  },
+  async ({ collectionId, name }: any) => {
+    try {
+      const result = await sendCommandToFigma("add_variable_mode", {
+        collectionId,
+        name,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error adding variable mode: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Rename Variable Mode Tool
+server.tool(
+  "rename_variable_mode",
+  "Rename a mode in a variable collection",
+  {
+    collectionId: z.string().describe("Variable collection ID"),
+    modeId: z.string().optional().describe("Mode ID to rename"),
+    modeName: z.string().optional().describe("Existing mode name to rename"),
+    name: z.string().describe("New mode name"),
+  },
+  async ({ collectionId, modeId, modeName, name }: any) => {
+    try {
+      const result = await sendCommandToFigma("rename_variable_mode", {
+        collectionId,
+        modeId,
+        modeName,
+        name,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error renaming variable mode: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Remove Variable Mode Tool
+server.tool(
+  "remove_variable_mode",
+  "Remove a mode from a variable collection",
+  {
+    collectionId: z.string().describe("Variable collection ID"),
+    modeId: z.string().optional().describe("Mode ID to remove"),
+    modeName: z.string().optional().describe("Mode name to remove"),
+  },
+  async ({ collectionId, modeId, modeName }: any) => {
+    try {
+      const result = await sendCommandToFigma("remove_variable_mode", {
+        collectionId,
+        modeId,
+        modeName,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error removing variable mode: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
 // Create Variable Tool
 server.tool(
   "create_variable",
@@ -1028,14 +1209,28 @@ server.tool(
       .record(variableValueSchema)
       .optional()
       .describe("Map of modeId or mode name to value"),
+    description: z.string().optional().describe("Variable description"),
+    scopes: z.array(z.string()).optional().describe("Variable scopes"),
+    hiddenFromPublishing: z.boolean().optional(),
   },
-  async ({ name, collectionId, resolvedType, valuesByMode }: any) => {
+  async ({
+    name,
+    collectionId,
+    resolvedType,
+    valuesByMode,
+    description,
+    scopes,
+    hiddenFromPublishing,
+  }: any) => {
     try {
       const result = await sendCommandToFigma("create_variable", {
         name,
         collectionId,
         resolvedType,
         valuesByMode,
+        description,
+        scopes,
+        hiddenFromPublishing,
       });
       return {
         content: [
@@ -1051,6 +1246,92 @@ server.tool(
           {
             type: "text",
             text: `Error creating variable: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Update Variable Tool
+server.tool(
+  "update_variable",
+  "Update variable metadata or values",
+  {
+    variableId: z.string().describe("Target variable ID"),
+    name: z.string().optional().describe("Updated variable name"),
+    description: z.string().optional().describe("Updated description"),
+    scopes: z.array(z.string()).optional().describe("Updated scopes"),
+    hiddenFromPublishing: z.boolean().optional(),
+    valuesByMode: z
+      .record(variableValueSchema)
+      .optional()
+      .describe("Map of modeId or mode name to value"),
+  },
+  async ({
+    variableId,
+    name,
+    description,
+    scopes,
+    hiddenFromPublishing,
+    valuesByMode,
+  }: any) => {
+    try {
+      const result = await sendCommandToFigma("update_variable", {
+        variableId,
+        name,
+        description,
+        scopes,
+        hiddenFromPublishing,
+        valuesByMode,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error updating variable: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Delete Variable Tool
+server.tool(
+  "delete_variable",
+  "Delete a variable",
+  {
+    variableId: z.string().describe("Target variable ID"),
+  },
+  async ({ variableId }: any) => {
+    try {
+      const result = await sendCommandToFigma("delete_variable", {
+        variableId,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error deleting variable: ${error instanceof Error ? error.message : String(error)}`,
           },
         ],
       };
@@ -2743,12 +3024,18 @@ This detailed process ensures you correctly interpret the reaction data, prepare
 
 
 // Define command types and parameters
+type VariableAliasInput = {
+  type: "VARIABLE_ALIAS";
+  variableId?: string;
+  id?: string;
+};
+
 type VariableValueInput =
   | string
   | number
   | boolean
   | { r: number; g: number; b: number; a?: number }
-  | { type: "VARIABLE_ALIAS"; variableId: string };
+  | VariableAliasInput;
 
 type FigmaCommand =
   | "get_document_info"
@@ -2766,8 +3053,15 @@ type FigmaCommand =
   | "delete_node"
   | "delete_multiple_nodes"
   | "get_styles"
+  | "get_variable_collections"
+  | "get_variables"
   | "create_variable_collection"
+  | "add_variable_mode"
+  | "rename_variable_mode"
+  | "remove_variable_mode"
   | "create_variable"
+  | "update_variable"
+  | "delete_variable"
   | "set_variable_value"
   | "get_local_components"
   | "create_component_instance"
@@ -2861,15 +3155,49 @@ type CommandParams = {
     nodeIds: string[];
   };
   get_styles: Record<string, never>;
+  get_variable_collections: Record<string, never>;
+  get_variables: {
+    collectionId?: string;
+    resolvedType?: "COLOR" | "FLOAT" | "STRING" | "BOOLEAN";
+  };
   create_variable_collection: {
     name: string;
     modes?: string[];
+  };
+  add_variable_mode: {
+    collectionId: string;
+    name: string;
+  };
+  rename_variable_mode: {
+    collectionId: string;
+    modeId?: string;
+    modeName?: string;
+    name: string;
+  };
+  remove_variable_mode: {
+    collectionId: string;
+    modeId?: string;
+    modeName?: string;
   };
   create_variable: {
     name: string;
     collectionId: string;
     resolvedType: "COLOR" | "FLOAT" | "STRING" | "BOOLEAN";
     valuesByMode?: Record<string, VariableValueInput>;
+    description?: string;
+    scopes?: string[];
+    hiddenFromPublishing?: boolean;
+  };
+  update_variable: {
+    variableId: string;
+    name?: string;
+    description?: string;
+    scopes?: string[];
+    hiddenFromPublishing?: boolean;
+    valuesByMode?: Record<string, VariableValueInput>;
+  };
+  delete_variable: {
+    variableId: string;
   };
   set_variable_value: {
     variableId: string;

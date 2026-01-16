@@ -141,10 +141,24 @@ async function handleCommand(command, params) {
       return await deleteMultipleNodes(params);
     case "get_styles":
       return await getStyles();
+    case "get_variable_collections":
+      return await getVariableCollections();
+    case "get_variables":
+      return await getVariables(params);
     case "create_variable_collection":
       return await createVariableCollection(params);
+    case "add_variable_mode":
+      return await addVariableMode(params);
+    case "rename_variable_mode":
+      return await renameVariableMode(params);
+    case "remove_variable_mode":
+      return await removeVariableMode(params);
     case "create_variable":
       return await createVariable(params);
+    case "update_variable":
+      return await updateVariable(params);
+    case "delete_variable":
+      return await deleteVariable(params);
     case "set_variable_value":
       return await setVariableValue(params);
     case "get_local_components":
@@ -1151,6 +1165,33 @@ function serializeVariableCollection(collection) {
   };
 }
 
+function normalizeVariableValue(value) {
+  if (value && typeof value === "object" && value.type === "VARIABLE_ALIAS") {
+    const variableId = value.variableId || value.id;
+    if (variableId) {
+      return {
+        type: "VARIABLE_ALIAS",
+        variableId,
+      };
+    }
+  }
+
+  return value;
+}
+
+function normalizeValuesByMode(valuesByMode) {
+  if (!valuesByMode || typeof valuesByMode !== "object") {
+    return valuesByMode;
+  }
+
+  const normalized = {};
+  for (const [modeId, value] of Object.entries(valuesByMode)) {
+    normalized[modeId] = normalizeVariableValue(value);
+  }
+
+  return normalized;
+}
+
 function resolveModeId(collection, modeKey) {
   if (!modeKey) {
     return collection.defaultModeId;
@@ -1172,16 +1213,17 @@ function resolveModeId(collection, modeKey) {
 async function resolveVariableValue(rawValue, resolvedType) {
   if (rawValue && typeof rawValue === "object") {
     if (rawValue.type === "VARIABLE_ALIAS") {
-      if (!rawValue.variableId) {
+      const aliasId = rawValue.variableId || rawValue.id;
+      if (!aliasId) {
         throw new Error("VARIABLE_ALIAS requires variableId");
       }
 
       const aliasVariable = await figma.variables.getVariableByIdAsync(
-        rawValue.variableId
+        aliasId
       );
       if (!aliasVariable) {
         throw new Error(
-          `Variable not found for alias: ${rawValue.variableId}`
+          `Variable not found for alias: ${aliasId}`
         );
       }
       return figma.variables.createVariableAlias(aliasVariable);
@@ -1261,7 +1303,120 @@ function serializeVariable(variable) {
     key: variable.key,
     resolvedType: variable.resolvedType,
     variableCollectionId: variable.variableCollectionId,
-    valuesByMode: variable.valuesByMode,
+    description: variable.description,
+    scopes: variable.scopes,
+    hiddenFromPublishing: variable.hiddenFromPublishing,
+    valuesByMode: normalizeValuesByMode(variable.valuesByMode),
+  };
+}
+
+async function getVariableCollections() {
+  ensureVariablesApi();
+
+  const collections = await figma.variables.getLocalVariableCollectionsAsync();
+  return {
+    count: collections.length,
+    collections: collections.map((collection) =>
+      serializeVariableCollection(collection)
+    ),
+  };
+}
+
+async function getVariables(params) {
+  ensureVariablesApi();
+
+  const { collectionId, resolvedType } = params || {};
+  const variables = await figma.variables.getLocalVariablesAsync();
+
+  const filtered = variables.filter((variable) => {
+    if (collectionId && variable.variableCollectionId !== collectionId) {
+      return false;
+    }
+    if (resolvedType && variable.resolvedType !== resolvedType) {
+      return false;
+    }
+    return true;
+  });
+
+  return {
+    count: filtered.length,
+    variables: filtered.map((variable) => serializeVariable(variable)),
+  };
+}
+
+async function addVariableMode(params) {
+  ensureVariablesApi();
+
+  const { collectionId, name } = params || {};
+  if (!collectionId) {
+    throw new Error("Missing collectionId parameter");
+  }
+  if (!name) {
+    throw new Error("Missing name parameter");
+  }
+
+  const collection = await figma.variables.getVariableCollectionByIdAsync(
+    collectionId
+  );
+  if (!collection) {
+    throw new Error(`Variable collection not found: ${collectionId}`);
+  }
+
+  const modeId = collection.addMode(name);
+  return {
+    modeId,
+    collection: serializeVariableCollection(collection),
+  };
+}
+
+async function renameVariableMode(params) {
+  ensureVariablesApi();
+
+  const { collectionId, modeId, modeName, name } = params || {};
+  if (!collectionId) {
+    throw new Error("Missing collectionId parameter");
+  }
+  if (!name) {
+    throw new Error("Missing name parameter");
+  }
+
+  const collection = await figma.variables.getVariableCollectionByIdAsync(
+    collectionId
+  );
+  if (!collection) {
+    throw new Error(`Variable collection not found: ${collectionId}`);
+  }
+
+  const targetModeId = resolveModeId(collection, modeId || modeName);
+  collection.renameMode(targetModeId, name);
+
+  return {
+    modeId: targetModeId,
+    collection: serializeVariableCollection(collection),
+  };
+}
+
+async function removeVariableMode(params) {
+  ensureVariablesApi();
+
+  const { collectionId, modeId, modeName } = params || {};
+  if (!collectionId) {
+    throw new Error("Missing collectionId parameter");
+  }
+
+  const collection = await figma.variables.getVariableCollectionByIdAsync(
+    collectionId
+  );
+  if (!collection) {
+    throw new Error(`Variable collection not found: ${collectionId}`);
+  }
+
+  const targetModeId = resolveModeId(collection, modeId || modeName);
+  collection.removeMode(targetModeId);
+
+  return {
+    modeId: targetModeId,
+    collection: serializeVariableCollection(collection),
   };
 }
 
@@ -1321,6 +1476,84 @@ async function createVariable(params) {
   }
 
   return serializeVariable(variable);
+}
+
+async function updateVariable(params) {
+  ensureVariablesApi();
+
+  const {
+    variableId,
+    name,
+    description,
+    scopes,
+    hiddenFromPublishing,
+    valuesByMode,
+  } = params || {};
+
+  if (!variableId) {
+    throw new Error("Missing variableId parameter");
+  }
+
+  const variable = await figma.variables.getVariableByIdAsync(variableId);
+  if (!variable) {
+    throw new Error(`Variable not found: ${variableId}`);
+  }
+
+  if (typeof name === "string") {
+    variable.name = name;
+  }
+  if (typeof description === "string") {
+    variable.description = description;
+  }
+  if (Array.isArray(scopes)) {
+    variable.scopes = scopes;
+  }
+  if (typeof hiddenFromPublishing === "boolean") {
+    variable.hiddenFromPublishing = hiddenFromPublishing;
+  }
+
+  const modeValues =
+    valuesByMode && typeof valuesByMode === "object" ? valuesByMode : null;
+  if (modeValues) {
+    const collection = await figma.variables.getVariableCollectionByIdAsync(
+      variable.variableCollectionId
+    );
+    if (!collection) {
+      throw new Error(
+        `Variable collection not found: ${variable.variableCollectionId}`
+      );
+    }
+
+    for (const [modeKey, rawValue] of Object.entries(modeValues)) {
+      const modeId = resolveModeId(collection, modeKey);
+      const value = await resolveVariableValue(rawValue, variable.resolvedType);
+      variable.setValueForMode(modeId, value);
+    }
+  }
+
+  return serializeVariable(variable);
+}
+
+async function deleteVariable(params) {
+  ensureVariablesApi();
+
+  const { variableId } = params || {};
+  if (!variableId) {
+    throw new Error("Missing variableId parameter");
+  }
+
+  const variable = await figma.variables.getVariableByIdAsync(variableId);
+  if (!variable) {
+    throw new Error(`Variable not found: ${variableId}`);
+  }
+
+  const response = {
+    id: variable.id,
+    name: variable.name,
+  };
+
+  variable.remove();
+  return response;
 }
 
 async function setVariableValue(params) {
