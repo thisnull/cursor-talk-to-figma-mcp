@@ -145,9 +145,50 @@ The MCP server provides the following tools for interacting with Figma:
 
 ### Prototyping & Connections
 
-- `get_reactions` - Get all prototype reactions from nodes with visual highlight animation
+- `get_reactions` - Get prototype reactions from nodes with visual highlight animation (used for connector mapping)
+- `get_node_reactions` - Get raw reactions for a specific node
+- `set_node_reactions` - Replace or append reactions on a node
+- `add_interaction` - Add a prototype interaction with simplified trigger/action inputs
+- `update_node_reaction` - Update a reaction by index
+- `remove_node_reaction` - Remove a reaction by index
+- `clear_node_reactions` - Remove all reactions from a node
+- `get_flow_starting_points` - Read flow starting points for the current page
+- `get_prototype_start_node` - Read the prototype start node for the current page
 - `set_default_connector` - Set a copied FigJam connector as the default connector style for creating connections (must be set before creating connections)
 - `create_connections` - Create FigJam connector lines between nodes, based on prototype flows or custom mapping
+
+Example: add hover -> change-to interaction (variant swap):
+
+```json
+{
+  "nodeId": "1:23",
+  "mode": "append",
+  "reactions": [
+    {
+      "trigger": { "type": "ON_HOVER" },
+      "actions": [
+        {
+          "type": "NODE",
+          "navigation": "CHANGE_TO",
+          "destinationId": "1:42",
+          "transition": null
+        }
+      ]
+    }
+  ]
+}
+```
+
+Example: add interaction with simplified inputs:
+
+```json
+{
+  "nodeId": "1:23",
+  "trigger": { "type": "hover" },
+  "action": { "type": "change_to", "destinationId": "1:42" },
+  "options": { "animation": "smart", "duration": 0.3 }
+}
+```
 
 ### Creating Elements
 

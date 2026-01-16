@@ -133,6 +133,91 @@ const variableBindableNodeFieldSchema = z.enum([
   "gridColumnGap",
 ]);
 
+const reactionSchema = z
+  .object({
+    trigger: z.object({ type: z.string() }).passthrough(),
+    actions: z.array(z.object({ type: z.string() }).passthrough()).optional(),
+    action: z.object({ type: z.string() }).passthrough().optional(),
+  })
+  .passthrough();
+
+const interactionTriggerSchema = z
+  .object({
+    type: z.enum([
+      "click",
+      "hover",
+      "press",
+      "drag",
+      "after_delay",
+      "mouse_enter",
+      "mouse_leave",
+      "mouse_down",
+      "mouse_up",
+      "key_down",
+      "media_hit",
+      "media_end",
+    ]),
+    delay: z.number().optional(),
+    timeout: z.number().optional(),
+    keyCodes: z.array(z.number()).optional(),
+    device: z.string().optional(),
+    mediaHitTime: z.number().optional(),
+  })
+  .passthrough();
+
+const interactionActionSchema = z
+  .object({
+    type: z.enum([
+      "navigate",
+      "change_to",
+      "overlay",
+      "swap",
+      "scroll_to",
+      "back",
+      "close",
+      "open_url",
+      "set_variable",
+      "set_mode",
+      "conditional",
+      "update_media",
+    ]),
+    destinationId: z.string().optional(),
+    url: z.string().optional(),
+    variableId: z.string().optional(),
+    variableValue: z.unknown().optional(),
+    variableCollectionId: z.string().optional(),
+    variableModeId: z.string().optional(),
+    conditionalBlocks: z.array(z.unknown()).optional(),
+    mediaAction: z.string().optional(),
+    amountToSkip: z.number().optional(),
+    newTimestamp: z.number().optional(),
+  })
+  .passthrough();
+
+const interactionOptionsSchema = z
+  .object({
+    animation: z
+      .enum([
+        "smart",
+        "dissolve",
+        "instant",
+        "scroll_animate",
+        "slide_in",
+        "slide_out",
+        "push",
+        "move_in",
+        "move_out",
+      ])
+      .optional(),
+    animationDirection: z.enum(["left", "right", "top", "bottom"]).optional(),
+    duration: z.number().optional(),
+    easing: z.union([z.string(), z.object({ type: z.string() }).passthrough()]).optional(),
+    preserveScrollPosition: z.boolean().optional(),
+    matchLayers: z.boolean().optional(),
+    replaceExisting: z.boolean().optional(),
+  })
+  .optional();
+
 // Document Info Tool
 server.tool(
   "get_document_info",
@@ -2939,6 +3024,276 @@ server.tool(
   }
 );
 
+// Get Node Reactions Tool
+server.tool(
+  "get_node_reactions",
+  "Get raw prototype reactions for a specific node",
+  {
+    nodeId: z.string().describe("Target node ID"),
+  },
+  async ({ nodeId }: any) => {
+    try {
+      const result = await sendCommandToFigma("get_node_reactions", { nodeId });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error getting node reactions: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Set Node Reactions Tool
+server.tool(
+  "set_node_reactions",
+  "Set or append prototype reactions on a node",
+  {
+    nodeId: z.string().describe("Target node ID"),
+    reactions: z.array(reactionSchema).describe("Reaction objects to apply"),
+    mode: z.enum(["replace", "append"]).optional().describe("Replace or append reactions"),
+  },
+  async ({ nodeId, reactions, mode }: any) => {
+    try {
+      const result = await sendCommandToFigma("set_node_reactions", {
+        nodeId,
+        reactions,
+        mode,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error setting node reactions: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Add Interaction Tool
+server.tool(
+  "add_interaction",
+  "Add a prototype interaction with simplified trigger/action inputs",
+  {
+    nodeId: z.string().describe("Target node ID"),
+    trigger: interactionTriggerSchema.describe("Trigger definition"),
+    action: interactionActionSchema.describe("Action definition"),
+    options: interactionOptionsSchema.describe("Optional interaction options"),
+  },
+  async ({ nodeId, trigger, action, options }: any) => {
+    try {
+      const result = await sendCommandToFigma("add_interaction", {
+        nodeId,
+        trigger,
+        action,
+        options,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error adding interaction: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Update Node Reaction Tool
+server.tool(
+  "update_node_reaction",
+  "Update a single reaction on a node by index",
+  {
+    nodeId: z.string().describe("Target node ID"),
+    index: z.number().int().describe("Reaction index to update"),
+    reaction: reactionSchema.describe("Replacement reaction object"),
+  },
+  async ({ nodeId, index, reaction }: any) => {
+    try {
+      const result = await sendCommandToFigma("update_node_reaction", {
+        nodeId,
+        index,
+        reaction,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error updating node reaction: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Remove Node Reaction Tool
+server.tool(
+  "remove_node_reaction",
+  "Remove a single reaction on a node by index",
+  {
+    nodeId: z.string().describe("Target node ID"),
+    index: z.number().int().describe("Reaction index to remove"),
+  },
+  async ({ nodeId, index }: any) => {
+    try {
+      const result = await sendCommandToFigma("remove_node_reaction", {
+        nodeId,
+        index,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error removing node reaction: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Clear Node Reactions Tool
+server.tool(
+  "clear_node_reactions",
+  "Remove all reactions on a node",
+  {
+    nodeId: z.string().describe("Target node ID"),
+  },
+  async ({ nodeId }: any) => {
+    try {
+      const result = await sendCommandToFigma("clear_node_reactions", {
+        nodeId,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error clearing node reactions: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Get Flow Starting Points Tool
+server.tool(
+  "get_flow_starting_points",
+  "Get flow starting points for the current page (read-only)",
+  {},
+  async () => {
+    try {
+      const result = await sendCommandToFigma("get_flow_starting_points");
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error getting flow starting points: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Get Prototype Start Node Tool
+server.tool(
+  "get_prototype_start_node",
+  "Get prototype start node for the current page (read-only)",
+  {},
+  async () => {
+    try {
+      const result = await sendCommandToFigma("get_prototype_start_node");
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error getting prototype start node: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+);
+
 // Create Connectors Tool
 server.tool(
   "set_default_connector",
@@ -3235,6 +3590,14 @@ type FigmaCommand =
   | "set_layout_sizing"
   | "set_item_spacing"
   | "get_reactions"
+  | "get_node_reactions"
+  | "set_node_reactions"
+  | "add_interaction"
+  | "update_node_reaction"
+  | "remove_node_reaction"
+  | "clear_node_reactions"
+  | "get_flow_starting_points"
+  | "get_prototype_start_node"
   | "set_default_connector"
   | "create_connections"
   | "set_focus"
@@ -3440,6 +3803,32 @@ type CommandParams = {
     types: Array<string>;
   };
   get_reactions: { nodeIds: string[] };
+  get_node_reactions: { nodeId: string };
+  set_node_reactions: {
+    nodeId: string;
+    reactions: Array<Record<string, unknown>>;
+    mode?: "replace" | "append";
+  };
+  add_interaction: {
+    nodeId: string;
+    trigger: Record<string, unknown>;
+    action: Record<string, unknown>;
+    options?: Record<string, unknown>;
+  };
+  update_node_reaction: {
+    nodeId: string;
+    index: number;
+    reaction: Record<string, unknown>;
+  };
+  remove_node_reaction: {
+    nodeId: string;
+    index: number;
+  };
+  clear_node_reactions: {
+    nodeId: string;
+  };
+  get_flow_starting_points: Record<string, never>;
+  get_prototype_start_node: Record<string, never>;
   set_default_connector: {
     connectorId?: string | undefined;
   };

@@ -251,6 +251,22 @@ async function handleCommand(command, params) {
         throw new Error("Missing or invalid nodeIds parameter");
       }
       return await getReactions(params.nodeIds);  
+    case "get_node_reactions":
+      return await getNodeReactions(params);
+    case "set_node_reactions":
+      return await setNodeReactions(params);
+    case "add_interaction":
+      return await addInteraction(params);
+    case "update_node_reaction":
+      return await updateNodeReaction(params);
+    case "remove_node_reaction":
+      return await removeNodeReaction(params);
+    case "clear_node_reactions":
+      return await clearNodeReactions(params);
+    case "get_flow_starting_points":
+      return await getFlowStartingPoints();
+    case "get_prototype_start_node":
+      return await getPrototypeStartNode();
     case "set_default_connector":
       return await setDefaultConnector(params);
     case "create_connections":
@@ -644,6 +660,631 @@ async function getReactions(nodeIds) {
   } catch (error) {
     throw new Error(`Failed to get reactions: ${error.message}`);
   }
+}
+
+function ensureReactionsSupported(node) {
+  if (!node || !("reactions" in node)) {
+    throw new Error("This node does not support prototyping reactions.");
+  }
+}
+
+const triggerTypeMap = {
+  click: "ON_CLICK",
+  hover: "ON_HOVER",
+  press: "ON_PRESS",
+  drag: "ON_DRAG",
+  after_delay: "AFTER_TIMEOUT",
+  mouse_enter: "MOUSE_ENTER",
+  mouse_leave: "MOUSE_LEAVE",
+  mouse_down: "MOUSE_DOWN",
+  mouse_up: "MOUSE_UP",
+  key_down: "ON_KEY_DOWN",
+  media_hit: "ON_MEDIA_HIT",
+  media_end: "ON_MEDIA_END",
+};
+
+const actionTypeMap = {
+  navigate: { type: "NODE", navigation: "NAVIGATE" },
+  change_to: { type: "NODE", navigation: "CHANGE_TO" },
+  overlay: { type: "NODE", navigation: "OVERLAY" },
+  swap: { type: "NODE", navigation: "SWAP" },
+  scroll_to: { type: "NODE", navigation: "SCROLL_TO" },
+  back: { type: "BACK" },
+  close: { type: "CLOSE" },
+  open_url: { type: "URL" },
+  set_variable: { type: "SET_VARIABLE" },
+  set_mode: { type: "SET_VARIABLE_MODE" },
+  conditional: { type: "CONDITIONAL" },
+  update_media: { type: "UPDATE_MEDIA_RUNTIME" },
+};
+
+const transitionTypeMap = {
+  smart: "SMART_ANIMATE",
+  dissolve: "DISSOLVE",
+  scroll_animate: "SCROLL_ANIMATE",
+  slide_in: "SLIDE_IN",
+  slide_out: "SLIDE_OUT",
+  push: "PUSH",
+  move_in: "MOVE_IN",
+  move_out: "MOVE_OUT",
+};
+
+const easingTypeMap = {
+  "ease-in": "EASE_IN",
+  "ease-out": "EASE_OUT",
+  "ease-in-out": "EASE_IN_AND_OUT",
+  linear: "LINEAR",
+  "ease-in-back": "EASE_IN_BACK",
+  "ease-out-back": "EASE_OUT_BACK",
+  "ease-in-out-back": "EASE_IN_AND_OUT_BACK",
+};
+
+function normalizeTrigger(input, index) {
+  if (!input || typeof input !== "object") {
+    throw new Error(`Trigger at index ${index} must be an object`);
+  }
+
+  const rawType = input.type;
+  if (!rawType) {
+    throw new Error(`Trigger at index ${index} is missing type`);
+  }
+
+  const mappedType = triggerTypeMap[rawType] || rawType;
+  const trigger = { type: mappedType };
+
+  if (mappedType === "AFTER_TIMEOUT") {
+    trigger.timeout =
+      typeof input.timeout === "number" ? input.timeout : input.delay;
+    if (typeof trigger.timeout !== "number") {
+      trigger.timeout = 1000;
+    }
+  }
+
+  if (
+    mappedType === "MOUSE_UP" ||
+    mappedType === "MOUSE_DOWN" ||
+    mappedType === "MOUSE_ENTER" ||
+    mappedType === "MOUSE_LEAVE"
+  ) {
+    trigger.delay = typeof input.delay === "number" ? input.delay : 0;
+  }
+
+  if (mappedType === "ON_KEY_DOWN") {
+    trigger.device = input.device || "KEYBOARD";
+    if (!Array.isArray(input.keyCodes) || input.keyCodes.length === 0) {
+      throw new Error(`ON_KEY_DOWN requires keyCodes at index ${index}`);
+    }
+    trigger.keyCodes = input.keyCodes;
+  }
+
+  if (mappedType === "ON_MEDIA_HIT") {
+    trigger.mediaHitTime = input.mediaHitTime;
+    if (typeof trigger.mediaHitTime !== "number") {
+      throw new Error(`ON_MEDIA_HIT requires mediaHitTime at index ${index}`);
+    }
+  }
+
+  return trigger;
+}
+
+function normalizeEasing(easingInput) {
+  if (!easingInput) {
+    return { type: "EASE_IN_AND_OUT" };
+  }
+
+  if (typeof easingInput === "string") {
+    return { type: easingTypeMap[easingInput] || easingInput };
+  }
+
+  const easing = Object.assign({}, easingInput);
+  if (!easing.type) {
+    easing.type = "EASE_IN_AND_OUT";
+  }
+
+  if (
+    easing.type === "CUSTOM_CUBIC_BEZIER" &&
+    !easing.easingFunctionCubicBezier
+  ) {
+    throw new Error("CUSTOM_CUBIC_BEZIER requires easingFunctionCubicBezier");
+  }
+
+  if (easing.type === "CUSTOM_SPRING" && !easing.easingFunctionSpring) {
+    throw new Error("CUSTOM_SPRING requires easingFunctionSpring");
+  }
+
+  return easing;
+}
+
+function normalizeTransition(transitionInput, options, index) {
+  if (transitionInput === null) {
+    return null;
+  }
+
+  let transition = null;
+
+  if (typeof transitionInput === "undefined") {
+    transition = null;
+  } else {
+    transition = Object.assign({}, transitionInput);
+  }
+
+  if (!transition && options && options.animation) {
+    if (options.animation !== "instant") {
+      const mappedType =
+        transitionTypeMap[options.animation] || options.animation;
+      transition = { type: mappedType };
+    }
+  }
+
+  if (!transition) {
+    return null;
+  }
+
+  const transitionType = transition.type;
+  if (!transitionType) {
+    throw new Error(`Transition missing type at index ${index}`);
+  }
+
+  const directionalTypes = [
+    "MOVE_IN",
+    "MOVE_OUT",
+    "PUSH",
+    "SLIDE_IN",
+    "SLIDE_OUT",
+  ];
+
+  if (directionalTypes.indexOf(transitionType) !== -1) {
+    transition.direction =
+      transition.direction ||
+      (options && options.animationDirection
+        ? options.animationDirection.toUpperCase()
+        : "RIGHT");
+    if (typeof transition.matchLayers !== "boolean") {
+      transition.matchLayers = Boolean(options && options.matchLayers);
+    }
+  }
+
+  if (!transition.easing) {
+    transition.easing = normalizeEasing(options && options.easing);
+  } else {
+    transition.easing = normalizeEasing(transition.easing);
+  }
+
+  if (typeof transition.duration !== "number") {
+    transition.duration =
+      options && typeof options.duration === "number" ? options.duration : 0.3;
+  }
+
+  return transition;
+}
+
+function normalizeAction(input, index, options) {
+  if (!input || typeof input !== "object") {
+    throw new Error(`Action at index ${index} must be an object`);
+  }
+
+  const mapped = actionTypeMap[input.type];
+  const base = mapped ? Object.assign({}, mapped) : Object.assign({}, input);
+  const type = base.type || input.type;
+
+  if (!type) {
+    throw new Error(`Action at index ${index} is missing type`);
+  }
+
+  if (type === "NODE") {
+    const navigation = base.navigation || input.navigation || "NAVIGATE";
+    const destinationId = input.destinationId || base.destinationId;
+    if (!destinationId) {
+      throw new Error(`NODE action missing destinationId at index ${index}`);
+    }
+
+    const transition = normalizeTransition(
+      input.transition,
+      options,
+      index
+    );
+
+    const nodeAction = {
+      type: "NODE",
+      destinationId: destinationId,
+      navigation: navigation,
+      transition: transition,
+    };
+
+    if (typeof input.preserveScrollPosition === "boolean") {
+      nodeAction.preserveScrollPosition = input.preserveScrollPosition;
+    } else if (options && typeof options.preserveScrollPosition === "boolean") {
+      nodeAction.preserveScrollPosition = options.preserveScrollPosition;
+    }
+
+    if (input.overlayRelativePosition) {
+      nodeAction.overlayRelativePosition = input.overlayRelativePosition;
+    }
+    if (typeof input.resetVideoPosition === "boolean") {
+      nodeAction.resetVideoPosition = input.resetVideoPosition;
+    }
+    if (typeof input.resetScrollPosition === "boolean") {
+      nodeAction.resetScrollPosition = input.resetScrollPosition;
+    }
+    if (typeof input.resetInteractiveComponents === "boolean") {
+      nodeAction.resetInteractiveComponents = input.resetInteractiveComponents;
+    }
+
+    if (typeof nodeAction.transition === "undefined") {
+      nodeAction.transition = null;
+    }
+
+    return nodeAction;
+  }
+
+  if (type === "BACK" || type === "CLOSE") {
+    return { type: type };
+  }
+
+  if (type === "URL") {
+    if (!input.url) {
+      throw new Error(`URL action missing url at index ${index}`);
+    }
+    return {
+      type: "URL",
+      url: input.url,
+    };
+  }
+
+  if (type === "SET_VARIABLE") {
+    if (!input.variableId) {
+      throw new Error(`SET_VARIABLE missing variableId at index ${index}`);
+    }
+    if (typeof input.variableValue === "undefined") {
+      throw new Error(`SET_VARIABLE missing variableValue at index ${index}`);
+    }
+    return {
+      type: "SET_VARIABLE",
+      variableId: input.variableId,
+      variableValue: input.variableValue,
+    };
+  }
+
+  if (type === "SET_VARIABLE_MODE") {
+    if (!input.variableCollectionId || !input.variableModeId) {
+      throw new Error(
+        `SET_VARIABLE_MODE missing variableCollectionId or variableModeId at index ${index}`
+      );
+    }
+    return {
+      type: "SET_VARIABLE_MODE",
+      variableCollectionId: input.variableCollectionId,
+      variableModeId: input.variableModeId,
+    };
+  }
+
+  if (type === "CONDITIONAL") {
+    if (!Array.isArray(input.conditionalBlocks)) {
+      throw new Error(`CONDITIONAL missing conditionalBlocks at index ${index}`);
+    }
+    return {
+      type: "CONDITIONAL",
+      conditionalBlocks: input.conditionalBlocks,
+    };
+  }
+
+  if (type === "UPDATE_MEDIA_RUNTIME") {
+    if (!input.mediaAction) {
+      throw new Error(
+        `UPDATE_MEDIA_RUNTIME missing mediaAction at index ${index}`
+      );
+    }
+
+    const mediaAction = {
+      type: "UPDATE_MEDIA_RUNTIME",
+      mediaAction: input.mediaAction,
+    };
+
+    if (input.destinationId) {
+      mediaAction.destinationId = input.destinationId;
+    }
+    if (typeof input.amountToSkip === "number") {
+      mediaAction.amountToSkip = input.amountToSkip;
+    }
+    if (typeof input.newTimestamp === "number") {
+      mediaAction.newTimestamp = input.newTimestamp;
+    }
+
+    return mediaAction;
+  }
+
+  throw new Error(`Unsupported action type: ${type}`);
+}
+
+function normalizeReactionInput(reaction, index, options) {
+  if (!reaction || typeof reaction !== "object") {
+    throw new Error(`Reaction at index ${index} must be an object`);
+  }
+
+  const normalized = Object.assign({}, reaction);
+
+  if (!normalized.trigger) {
+    throw new Error(`Reaction at index ${index} is missing trigger`);
+  }
+
+  normalized.trigger = normalizeTrigger(normalized.trigger, index);
+
+  const actions = Array.isArray(normalized.actions)
+    ? normalized.actions.slice()
+    : [];
+  const action = normalized.action;
+
+  if (!action && actions.length === 0) {
+    throw new Error(`Reaction at index ${index} must include action or actions`);
+  }
+
+  const normalizedAction = action
+    ? normalizeAction(action, index, options)
+    : normalizeAction(actions[0], index, options);
+
+  const normalizedActions =
+    actions.length > 0
+      ? actions.map((candidate, idx) =>
+          normalizeAction(candidate, idx, options)
+        )
+      : [normalizedAction];
+
+  normalized.action = normalizedAction;
+  normalized.actions = normalizedActions;
+
+  return normalized;
+}
+
+async function applyNodeReactions(node, reactions) {
+  if (typeof node.setReactionsAsync === "function") {
+    await node.setReactionsAsync(reactions);
+    return;
+  }
+
+  node.reactions = reactions;
+}
+
+async function getNodeReactions(params) {
+  const { nodeId } = params || {};
+  if (!nodeId) {
+    throw new Error("Missing nodeId parameter");
+  }
+
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (!node) {
+    throw new Error(`Node not found with ID: ${nodeId}`);
+  }
+
+  ensureReactionsSupported(node);
+
+  return {
+    nodeId: node.id,
+    name: node.name,
+    type: node.type,
+    reactions: Array.isArray(node.reactions) ? node.reactions : [],
+  };
+}
+
+async function setNodeReactions(params) {
+  const { nodeId, reactions, mode = "replace" } = params || {};
+
+  if (!nodeId) {
+    throw new Error("Missing nodeId parameter");
+  }
+  if (!Array.isArray(reactions)) {
+    throw new Error("reactions must be an array");
+  }
+  if (mode !== "replace" && mode !== "append") {
+    throw new Error("mode must be 'replace' or 'append'");
+  }
+
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (!node) {
+    throw new Error(`Node not found with ID: ${nodeId}`);
+  }
+
+  ensureReactionsSupported(node);
+
+  const normalizedReactions = reactions.map((reaction, index) =>
+    normalizeReactionInput(reaction, index)
+  );
+
+  const existingReactions = Array.isArray(node.reactions)
+    ? node.reactions
+    : [];
+  const nextReactions =
+    mode === "append"
+      ? existingReactions.concat(normalizedReactions)
+      : normalizedReactions;
+
+  await applyNodeReactions(node, nextReactions);
+
+  return {
+    nodeId: node.id,
+    count: nextReactions.length,
+    reactions: nextReactions,
+  };
+}
+
+async function addInteraction(params) {
+  const { nodeId, trigger, action, options = {} } = params || {};
+
+  if (!nodeId) {
+    throw new Error("Missing nodeId parameter");
+  }
+  if (!trigger) {
+    throw new Error("Missing trigger parameter");
+  }
+  if (!action) {
+    throw new Error("Missing action parameter");
+  }
+
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (!node) {
+    throw new Error(`Node not found with ID: ${nodeId}`);
+  }
+
+  ensureReactionsSupported(node);
+
+  const reactionInput = {
+    trigger: trigger,
+    action: action,
+  };
+
+  const normalized = normalizeReactionInput(reactionInput, 0, options);
+
+  const existingReactions = Array.isArray(node.reactions)
+    ? node.reactions
+    : [];
+
+  const replaceExisting =
+    typeof options.replaceExisting === "boolean"
+      ? options.replaceExisting
+      : true;
+
+  let nextReactions = existingReactions.slice();
+  if (replaceExisting) {
+    const triggerType = normalized.trigger.type;
+    nextReactions = nextReactions.filter(
+      (reaction) =>
+        !reaction ||
+        !reaction.trigger ||
+        reaction.trigger.type !== triggerType
+    );
+  }
+
+  nextReactions.push(normalized);
+  await applyNodeReactions(node, nextReactions);
+
+  return {
+    nodeId: node.id,
+    count: nextReactions.length,
+    reaction: normalized,
+  };
+}
+
+async function updateNodeReaction(params) {
+  const { nodeId, index, reaction } = params || {};
+
+  if (!nodeId) {
+    throw new Error("Missing nodeId parameter");
+  }
+  if (typeof index !== "number") {
+    throw new Error("Missing index parameter");
+  }
+
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (!node) {
+    throw new Error(`Node not found with ID: ${nodeId}`);
+  }
+
+  ensureReactionsSupported(node);
+
+  const existingReactions = Array.isArray(node.reactions)
+    ? node.reactions
+    : [];
+
+  if (index < 0 || index >= existingReactions.length) {
+    throw new Error(`Reaction index out of range: ${index}`);
+  }
+
+  const normalized = normalizeReactionInput(reaction, index);
+  const nextReactions = existingReactions.slice();
+  nextReactions[index] = normalized;
+
+  await applyNodeReactions(node, nextReactions);
+
+  return {
+    nodeId: node.id,
+    index,
+    reaction: normalized,
+  };
+}
+
+async function removeNodeReaction(params) {
+  const { nodeId, index } = params || {};
+
+  if (!nodeId) {
+    throw new Error("Missing nodeId parameter");
+  }
+  if (typeof index !== "number") {
+    throw new Error("Missing index parameter");
+  }
+
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (!node) {
+    throw new Error(`Node not found with ID: ${nodeId}`);
+  }
+
+  ensureReactionsSupported(node);
+
+  const existingReactions = Array.isArray(node.reactions)
+    ? node.reactions
+    : [];
+
+  if (index < 0 || index >= existingReactions.length) {
+    throw new Error(`Reaction index out of range: ${index}`);
+  }
+
+  const nextReactions = existingReactions.filter((_, idx) => idx !== index);
+  await applyNodeReactions(node, nextReactions);
+
+  return {
+    nodeId: node.id,
+    count: nextReactions.length,
+  };
+}
+
+async function clearNodeReactions(params) {
+  const { nodeId } = params || {};
+
+  if (!nodeId) {
+    throw new Error("Missing nodeId parameter");
+  }
+
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (!node) {
+    throw new Error(`Node not found with ID: ${nodeId}`);
+  }
+
+  ensureReactionsSupported(node);
+
+  await applyNodeReactions(node, []);
+
+  return {
+    nodeId: node.id,
+    count: 0,
+  };
+}
+
+function getFlowStartingPoints() {
+  if (!figma.currentPage || !("flowStartingPoints" in figma.currentPage)) {
+    throw new Error("flowStartingPoints is not available in this editor.");
+  }
+
+  return {
+    pageId: figma.currentPage.id,
+    flowStartingPoints: figma.currentPage.flowStartingPoints || [],
+  };
+}
+
+function getPrototypeStartNode() {
+  const startNode = figma.currentPage.prototypeStartNode || null;
+  if (!startNode) {
+    return {
+      pageId: figma.currentPage.id,
+      prototypeStartNode: null,
+    };
+  }
+
+  return {
+    pageId: figma.currentPage.id,
+    prototypeStartNode: {
+      id: startNode.id,
+      name: startNode.name,
+      type: startNode.type,
+    },
+  };
 }
 
 async function readMyDesign() {
