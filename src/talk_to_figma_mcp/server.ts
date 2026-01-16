@@ -1845,6 +1845,48 @@ server.tool(
   }
 );
 
+// Set Component Description Tool
+server.tool(
+  "set_component_description",
+  "Set the description or descriptionMarkdown for a component or component set",
+  {
+    nodeId: z.string().describe("ID of the component or component set"),
+    description: z.string().optional().describe("Plain-text description"),
+    descriptionMarkdown: z
+      .string()
+      .optional()
+      .describe("Markdown description"),
+  },
+  async ({ nodeId, description, descriptionMarkdown }: any) => {
+    try {
+      const result = await sendCommandToFigma("set_component_description", {
+        nodeId,
+        description,
+        descriptionMarkdown,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error setting component description: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          },
+        ],
+      };
+    }
+  }
+);
+
 // Create Component From Node Tool
 server.tool(
   "create_component_from_node",
@@ -3742,6 +3784,7 @@ type FigmaCommand =
   | "bind_variable_to_paint"
   | "bind_variable_to_text_range"
   | "get_local_components"
+  | "set_component_description"
   | "create_component_from_node"
   | "combine_as_variants"
   | "set_variant_properties"
@@ -3915,6 +3958,11 @@ type CommandParams = {
   };
   get_local_components: Record<string, never>;
   get_team_components: Record<string, never>;
+  set_component_description: {
+    nodeId: string;
+    description?: string;
+    descriptionMarkdown?: string;
+  };
   create_component_from_node: {
     nodeId: string;
     preserveOriginal?: boolean;

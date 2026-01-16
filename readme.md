@@ -230,6 +230,7 @@ Tip: set `"skipCompatibilityChecks": true` in `options` to bypass trigger/action
 
 - `get_styles` - Get information about local styles
 - `get_local_components` - Get information about local components
+- `set_component_description` - Set description/descriptionMarkdown on a component or component set
 - `create_component_from_node` - Convert a node into a component (optionally preserve original)
 - `combine_as_variants` - Combine component nodes into a component set (variants)
 - `set_variant_properties` - Set variant properties by renaming a component variant (optionally syncs the whole component set)
@@ -258,6 +259,14 @@ Example: create variants from two frames
 {
   "nodeId": "56:78",
   "properties": { "State": "Default", "Size": "Small" }
+}
+```
+
+```json
+{
+  "nodeId": "21:196",
+  "description": "Primary button component",
+  "descriptionMarkdown": "**Primary** button component"
 }
 ```
 

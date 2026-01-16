@@ -171,6 +171,8 @@ async function handleCommand(command, params) {
       return await getLocalComponents();
     // case "get_team_components":
     //   return await getTeamComponents();
+    case "set_component_description":
+      return await setComponentDescription(params);
     case "create_component_from_node":
       return await createComponentFromNode(params);
     case "combine_as_variants":
@@ -2483,6 +2485,51 @@ async function getLocalComponents() {
       name: component.name,
       key: "key" in component ? component.key : null,
     })),
+  };
+}
+
+async function setComponentDescription(params) {
+  const { nodeId, description, descriptionMarkdown } = params || {};
+
+  if (!nodeId) {
+    throw new Error("Missing nodeId parameter");
+  }
+
+  if (
+    typeof description !== "string" &&
+    typeof descriptionMarkdown !== "string"
+  ) {
+    throw new Error("description or descriptionMarkdown must be provided");
+  }
+
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (!node) {
+    throw new Error(`Node not found with ID: ${nodeId}`);
+  }
+
+  if (node.type !== "COMPONENT" && node.type !== "COMPONENT_SET") {
+    throw new Error(
+      "set_component_description only supports COMPONENT or COMPONENT_SET nodes"
+    );
+  }
+
+  if ("remote" in node && node.remote) {
+    throw new Error("Remote components are read-only");
+  }
+
+  if (typeof description === "string") {
+    node.description = description;
+  }
+  if (typeof descriptionMarkdown === "string") {
+    node.descriptionMarkdown = descriptionMarkdown;
+  }
+
+  return {
+    id: node.id,
+    name: node.name,
+    type: node.type,
+    description: node.description,
+    descriptionMarkdown: node.descriptionMarkdown,
   };
 }
 
