@@ -925,10 +925,14 @@ function normalizeAction(input, index, options) {
     if (!input.url) {
       throw new Error(`URL action missing url at index ${index}`);
     }
-    return {
+    const urlAction = {
       type: "URL",
       url: input.url,
     };
+    if (typeof input.openInNewTab === "boolean") {
+      urlAction.openInNewTab = input.openInNewTab;
+    }
+    return urlAction;
   }
 
   if (type === "SET_VARIABLE") {
@@ -1125,6 +1129,48 @@ async function addInteraction(params) {
   }
 
   ensureReactionsSupported(node);
+
+  const mappedAction = actionTypeMap[action.type];
+  const normalizedActionType = mappedAction ? mappedAction.type : action.type;
+  const normalizedNavigation = mappedAction
+    ? mappedAction.navigation
+    : action.navigation;
+
+  if (normalizedActionType === "NODE" && normalizedNavigation === "CHANGE_TO") {
+    const destinationId = action.destinationId;
+    if (!destinationId) {
+      throw new Error("change_to requires destinationId");
+    }
+
+    const destinationNode = await figma.getNodeByIdAsync(destinationId);
+    if (!destinationNode) {
+      throw new Error(`Destination node not found with ID: ${destinationId}`);
+    }
+
+    const getVariantSetId = (target) => {
+      if (!target) {
+        return null;
+      }
+      if (target.type === "COMPONENT") {
+        const parent = target.parent;
+        return parent && parent.type === "COMPONENT_SET" ? parent.id : null;
+      }
+      if (target.type === "INSTANCE" && target.mainComponent) {
+        const parent = target.mainComponent.parent;
+        return parent && parent.type === "COMPONENT_SET" ? parent.id : null;
+      }
+      return null;
+    };
+
+    const sourceSetId = getVariantSetId(node);
+    const destinationSetId = getVariantSetId(destinationNode);
+
+    if (!sourceSetId || !destinationSetId || sourceSetId !== destinationSetId) {
+      throw new Error(
+        "change_to requires source and destination to be variants in the same component set"
+      );
+    }
+  }
 
   const reactionInput = {
     trigger: trigger,

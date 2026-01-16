@@ -183,6 +183,7 @@ const interactionActionSchema = z
     ]),
     destinationId: z.string().optional(),
     url: z.string().optional(),
+    openInNewTab: z.boolean().optional(),
     variableId: z.string().optional(),
     variableValue: z.unknown().optional(),
     variableCollectionId: z.string().optional(),
