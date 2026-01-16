@@ -230,9 +230,39 @@ Tip: set `"skipCompatibilityChecks": true` in `options` to bypass trigger/action
 
 - `get_styles` - Get information about local styles
 - `get_local_components` - Get information about local components
+- `create_component_from_node` - Convert a node into a component (optionally preserve original)
+- `combine_as_variants` - Combine component nodes into a component set (variants)
+- `set_variant_properties` - Set variant properties by renaming a component variant (optionally syncs the whole component set)
 - `create_component_instance` - Create an instance of a component
 - `get_instance_overrides` - Extract override properties from a selected component instance
 - `set_instance_overrides` - Apply extracted overrides to target instances
+
+Example: create variants from two frames
+
+```json
+{
+  "nodeId": "12:34",
+  "preserveOriginal": true,
+  "name": "Button"
+}
+```
+
+```json
+{
+  "componentIds": ["56:78", "56:79"],
+  "name": "Button"
+}
+```
+
+```json
+{
+  "nodeId": "56:78",
+  "properties": { "State": "Default", "Size": "Small" }
+}
+```
+
+Tip: `set_variant_properties` will auto-fill missing keys across the component set. Use
+`"syncComponentSet": false` to disable, or provide `"defaults"` for custom fallback values.
 
 ### Variables
 

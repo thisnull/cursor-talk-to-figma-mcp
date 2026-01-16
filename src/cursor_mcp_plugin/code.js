@@ -171,6 +171,12 @@ async function handleCommand(command, params) {
       return await getLocalComponents();
     // case "get_team_components":
     //   return await getTeamComponents();
+    case "create_component_from_node":
+      return await createComponentFromNode(params);
+    case "combine_as_variants":
+      return await combineAsVariants(params);
+    case "set_variant_properties":
+      return await setVariantProperties(params);
     case "create_component_instance":
       return await createComponentInstance(params);
     case "export_node_as_image":
@@ -2527,6 +2533,269 @@ async function createComponentInstance(params) {
   } catch (error) {
     throw new Error(`Error creating component instance: ${error.message}`);
   }
+}
+
+function getNodePage(node) {
+  let current = node;
+  while (current && current.type !== "PAGE") {
+    current = current.parent;
+  }
+  return current || null;
+}
+
+function formatVariantProperties(properties) {
+  const entries = Object.entries(properties).map(([key, value]) => {
+    if (typeof value === "undefined" || value === null) {
+      throw new Error(`Variant property "${key}" is missing a value`);
+    }
+    return `${key}=${String(value)}`;
+  });
+
+  entries.sort();
+  return entries.join(", ");
+}
+
+async function createComponentFromNode(params) {
+  const {
+    nodeId,
+    preserveOriginal = false,
+    name,
+    parentId,
+    index,
+  } = params || {};
+
+  if (!nodeId) {
+    throw new Error("Missing nodeId parameter");
+  }
+
+  const sourceNode = await figma.getNodeByIdAsync(nodeId);
+  if (!sourceNode) {
+    throw new Error(`Node not found with ID: ${nodeId}`);
+  }
+
+  if (typeof sourceNode.clone !== "function") {
+    throw new Error("Node cannot be converted to a component");
+  }
+
+  let targetNode = sourceNode;
+  if (preserveOriginal) {
+    targetNode = sourceNode.clone();
+    if ("x" in sourceNode && "y" in sourceNode) {
+      targetNode.x = sourceNode.x;
+      targetNode.y = sourceNode.y;
+    }
+  }
+
+  const component = figma.createComponentFromNode(targetNode);
+  if (name) {
+    component.name = name;
+  }
+
+  if (parentId) {
+    const parent = await figma.getNodeByIdAsync(parentId);
+    if (!parent) {
+      throw new Error(`Parent node not found with ID: ${parentId}`);
+    }
+    if (!("appendChild" in parent)) {
+      throw new Error(`Parent node does not support children: ${parentId}`);
+    }
+    if (typeof index === "number") {
+      parent.insertChild(index, component);
+    } else {
+      parent.appendChild(component);
+    }
+  }
+
+  return {
+    id: component.id,
+    name: component.name,
+    key: "key" in component ? component.key : null,
+    parentId: component.parent ? component.parent.id : null,
+    sourceNodeId: sourceNode.id,
+    createdFromNodeId: targetNode.id,
+  };
+}
+
+async function combineAsVariants(params) {
+  const { componentIds, parentId, index, name } = params || {};
+
+  if (!Array.isArray(componentIds) || componentIds.length === 0) {
+    throw new Error("componentIds must be a non-empty array");
+  }
+
+  const nodes = await Promise.all(
+    componentIds.map((id) => figma.getNodeByIdAsync(id))
+  );
+
+  const missing = nodes.findIndex((node) => !node);
+  if (missing !== -1) {
+    throw new Error(`Node not found with ID: ${componentIds[missing]}`);
+  }
+
+  const components = nodes.filter((node) => node.type === "COMPONENT");
+  if (components.length !== nodes.length) {
+    throw new Error("combine_as_variants requires component nodes only");
+  }
+
+  let parent = null;
+  if (parentId) {
+    parent = await figma.getNodeByIdAsync(parentId);
+    if (!parent) {
+      throw new Error(`Parent node not found with ID: ${parentId}`);
+    }
+  } else {
+    parent = components[0].parent;
+  }
+
+  if (!parent || !("appendChild" in parent)) {
+    throw new Error("Parent does not support children");
+  }
+
+  const parentPage = getNodePage(parent);
+  if (!parentPage) {
+    throw new Error("Parent must be on a page");
+  }
+
+  for (const component of components) {
+    const componentPage = getNodePage(component);
+    if (!componentPage || componentPage.id !== parentPage.id) {
+      throw new Error("All components must be on the same page as the parent");
+    }
+  }
+
+  const componentSet = figma.combineAsVariants(
+    components,
+    parent,
+    typeof index === "number" ? index : undefined
+  );
+
+  if (name) {
+    componentSet.name = name;
+  }
+
+  return {
+    id: componentSet.id,
+    name: componentSet.name,
+    key: "key" in componentSet ? componentSet.key : null,
+    parentId: componentSet.parent ? componentSet.parent.id : null,
+    variantIds: componentSet.children.map((child) => child.id),
+  };
+}
+
+async function setVariantProperties(params) {
+  const {
+    nodeId,
+    properties,
+    baseName,
+    mergeExisting = true,
+    syncComponentSet = true,
+    defaults,
+  } = params || {};
+
+  if (!nodeId) {
+    throw new Error("Missing nodeId parameter");
+  }
+  if (!properties || typeof properties !== "object") {
+    throw new Error("properties must be an object");
+  }
+
+  const node = await figma.getNodeByIdAsync(nodeId);
+  if (!node) {
+    throw new Error(`Node not found with ID: ${nodeId}`);
+  }
+
+  if (node.type !== "COMPONENT") {
+    throw new Error("set_variant_properties only supports component variants");
+  }
+
+  const componentSet =
+    node.parent && node.parent.type === "COMPONENT_SET" ? node.parent : null;
+
+  const resolveDefaultValue = (key, fallbackSource) => {
+    if (defaults && Object.prototype.hasOwnProperty.call(defaults, key)) {
+      return defaults[key];
+    }
+    if (
+      fallbackSource &&
+      Object.prototype.hasOwnProperty.call(fallbackSource, key)
+    ) {
+      return fallbackSource[key];
+    }
+    return "Default";
+  };
+
+  const buildVariantName = (variantProps) => {
+    const nameSuffix = formatVariantProperties(variantProps);
+    return baseName ? `${baseName} / ${nameSuffix}` : nameSuffix;
+  };
+
+  let nextProperties = mergeExisting && node.variantProperties
+    ? Object.assign({}, node.variantProperties, properties)
+    : Object.assign({}, properties);
+
+  if (Object.keys(nextProperties).length === 0) {
+    throw new Error("properties must include at least one entry");
+  }
+
+  if (!componentSet || !syncComponentSet) {
+    node.name = buildVariantName(nextProperties);
+    return {
+      id: node.id,
+      name: node.name,
+      variantProperties: nextProperties,
+    };
+  }
+
+  const allKeys = new Set(Object.keys(nextProperties));
+  componentSet.children.forEach((child) => {
+    if (child.type !== "COMPONENT") {
+      return;
+    }
+    if (child.variantProperties) {
+      Object.keys(child.variantProperties).forEach((key) => allKeys.add(key));
+    }
+  });
+
+  const updatedVariants = [];
+  const keys = Array.from(allKeys);
+
+  componentSet.children.forEach((child) => {
+    if (child.type !== "COMPONENT") {
+      return;
+    }
+
+    const childBase =
+      child.variantProperties && typeof child.variantProperties === "object"
+        ? Object.assign({}, child.variantProperties)
+        : {};
+    const isTarget = child.id === node.id;
+    const childProps = Object.assign({}, childBase);
+
+    keys.forEach((key) => {
+      if (isTarget) {
+        if (Object.prototype.hasOwnProperty.call(nextProperties, key)) {
+          childProps[key] = nextProperties[key];
+        } else if (!Object.prototype.hasOwnProperty.call(childProps, key)) {
+          childProps[key] = resolveDefaultValue(key, nextProperties);
+        }
+      } else if (!Object.prototype.hasOwnProperty.call(childProps, key)) {
+        childProps[key] = resolveDefaultValue(key, nextProperties);
+      }
+    });
+
+    child.name = buildVariantName(childProps);
+    updatedVariants.push({
+      id: child.id,
+      name: child.name,
+      variantProperties: childProps,
+    });
+  });
+
+  return {
+    componentSetId: componentSet.id,
+    updatedCount: updatedVariants.length,
+    variants: updatedVariants,
+  };
 }
 
 async function exportNodeAsImage(params) {

@@ -1845,6 +1845,176 @@ server.tool(
   }
 );
 
+// Create Component From Node Tool
+server.tool(
+  "create_component_from_node",
+  "Convert an existing node into a component (optionally preserving the original)",
+  {
+    nodeId: z.string().describe("ID of the node to convert"),
+    preserveOriginal: z
+      .boolean()
+      .optional()
+      .describe("Clone the node first and keep the original intact"),
+    name: z.string().optional().describe("Optional name for the new component"),
+    parentId: z
+      .string()
+      .optional()
+      .describe("Optional parent node ID to move the component under"),
+    index: z
+      .number()
+      .int()
+      .optional()
+      .describe("Optional index position under the parent"),
+  },
+  async ({ nodeId, preserveOriginal, name, parentId, index }: any) => {
+    try {
+      const result = await sendCommandToFigma("create_component_from_node", {
+        nodeId,
+        preserveOriginal,
+        name,
+        parentId,
+        index,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error creating component from node: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Combine As Variants Tool
+server.tool(
+  "combine_as_variants",
+  "Combine component nodes into a component set (variants)",
+  {
+    componentIds: z
+      .array(z.string())
+      .min(1)
+      .describe("IDs of component nodes to combine"),
+    parentId: z
+      .string()
+      .optional()
+      .describe("Parent node ID for the new component set"),
+    index: z
+      .number()
+      .int()
+      .optional()
+      .describe("Optional index position under the parent"),
+    name: z.string().optional().describe("Optional name for the component set"),
+  },
+  async ({ componentIds, parentId, index, name }: any) => {
+    try {
+      const result = await sendCommandToFigma("combine_as_variants", {
+        componentIds,
+        parentId,
+        index,
+        name,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error combining as variants: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          },
+        ],
+      };
+    }
+  }
+);
+
+// Set Variant Properties Tool
+server.tool(
+  "set_variant_properties",
+  "Set variant properties by renaming a component variant",
+  {
+    nodeId: z.string().describe("ID of the variant component"),
+    properties: z
+      .record(z.union([z.string(), z.number(), z.boolean()]))
+      .describe("Variant properties to apply (key/value pairs)"),
+    baseName: z
+      .string()
+      .optional()
+      .describe("Optional base name prefix (e.g. 'Button')"),
+    mergeExisting: z
+      .boolean()
+      .optional()
+      .describe("Merge with existing variant properties (default true)"),
+    syncComponentSet: z
+      .boolean()
+      .optional()
+      .describe("Apply missing properties across the entire component set"),
+    defaults: z
+      .record(z.union([z.string(), z.number(), z.boolean()]))
+      .optional()
+      .describe("Default values to fill missing variant properties"),
+  },
+  async ({
+    nodeId,
+    properties,
+    baseName,
+    mergeExisting,
+    syncComponentSet,
+    defaults,
+  }: any) => {
+    try {
+      const result = await sendCommandToFigma("set_variant_properties", {
+        nodeId,
+        properties,
+        baseName,
+        mergeExisting,
+        syncComponentSet,
+        defaults,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error setting variant properties: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          },
+        ],
+      };
+    }
+  }
+);
+
 // Create Component Instance Tool
 server.tool(
   "create_component_instance",
@@ -3572,6 +3742,9 @@ type FigmaCommand =
   | "bind_variable_to_paint"
   | "bind_variable_to_text_range"
   | "get_local_components"
+  | "create_component_from_node"
+  | "combine_as_variants"
+  | "set_variant_properties"
   | "create_component_instance"
   | "get_instance_overrides"
   | "set_instance_overrides"
@@ -3742,6 +3915,27 @@ type CommandParams = {
   };
   get_local_components: Record<string, never>;
   get_team_components: Record<string, never>;
+  create_component_from_node: {
+    nodeId: string;
+    preserveOriginal?: boolean;
+    name?: string;
+    parentId?: string;
+    index?: number;
+  };
+  combine_as_variants: {
+    componentIds: string[];
+    parentId?: string;
+    index?: number;
+    name?: string;
+  };
+  set_variant_properties: {
+    nodeId: string;
+    properties: Record<string, string | number | boolean>;
+    baseName?: string;
+    mergeExisting?: boolean;
+    syncComponentSet?: boolean;
+    defaults?: Record<string, string | number | boolean>;
+  };
   create_component_instance: {
     componentKey: string;
     x: number;
